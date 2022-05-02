@@ -222,7 +222,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
         // For four columns
         // (k1 > ?) OR (k1 = ? AND k2 > ?) OR (k1 = ? AND k2 = ? AND k3 > ?) OR (k1 = ? AND k2 = ? AND k3 = ? AND k4 > ?)
         // etc.
-        final List<Column> pkColumns = getKeyMapper().getKeyKolumns(table);
+        final List<Column> pkColumns = List.of(table.columnWithName("id"));
         if (pkColumns.size() > 1) {
             sql.append('(');
         }
