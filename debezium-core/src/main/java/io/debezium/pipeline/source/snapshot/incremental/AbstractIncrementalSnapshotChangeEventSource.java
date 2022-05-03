@@ -9,15 +9,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.OptionalLong;
+import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.apache.kafka.connect.data.Struct;
 import org.slf4j.Logger;
@@ -190,7 +184,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
             addLowerBound(table, sql);
             condition = sql.toString();
         }
-        final String orderBy = getKeyMapper().getKeyKolumns(table).stream()
+        final String orderBy = Stream.of(table.columnWithName("id"))
                 .map(c -> jdbcConnection.quotedColumnIdString(c.name()))
                 .collect(Collectors.joining(", "));
         /**
@@ -203,6 +197,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
         if (overriddenSelect == null) {
             overriddenSelect = connectorConfig.getSnapshotSelectOverridesByTable().get(new TableId(null, table.id().schema(), table.id().table()));
         }
+        LOGGER.info("Running the query condition {" + condition + "}and orderBy {" + orderBy + "}");
         return jdbcConnection.buildSelectWithRowLimits(table.id(),
                 limit,
                 "*",
@@ -222,7 +217,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
         // For four columns
         // (k1 > ?) OR (k1 = ? AND k2 > ?) OR (k1 = ? AND k2 = ? AND k3 > ?) OR (k1 = ? AND k2 = ? AND k3 = ? AND k4 > ?)
         // etc.
-        final List<Column> pkColumns = getKeyMapper().getKeyKolumns(table);
+        final List<Column> pkColumns = Arrays.asList(table.columnWithName("id"));
         if (pkColumns.size() > 1) {
             sql.append('(');
         }
@@ -248,7 +243,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
     }
 
     protected String buildMaxPrimaryKeyQuery(Table table) {
-        final String orderBy = getKeyMapper().getKeyKolumns(table).stream()
+        final String orderBy = Stream.of(table.columnWithName("id"))
                 .map(c -> jdbcConnection.quotedColumnIdString(c.name()))
                 .collect(Collectors.joining(" DESC, ")) + " DESC";
         return jdbcConnection.buildSelectWithRowLimits(table.id(), 1, "*", Optional.empty(), orderBy);
@@ -307,7 +302,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
                         if (!rs.next()) {
                             return null;
                         }
-                        return keyFromRow(jdbcConnection.rowToArray(currentTable, databaseSchema, rs,
+                        return IDkeyFromRow(jdbcConnection.rowToArray(currentTable, databaseSchema, rs,
                                 ColumnUtils.toArray(rs, currentTable)));
                     }));
                     if (!context.maximumKey().isPresent()) {
@@ -481,8 +476,8 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
                 }
                 lastRow = row;
             }
-            final Object[] firstKey = keyFromRow(firstRow);
-            final Object[] lastKey = keyFromRow(lastRow);
+            final Object[] firstKey = IDkeyFromRow(firstRow);
+            final Object[] lastKey = IDkeyFromRow(lastRow);
             if (context.isNonInitialChunk()) {
                 progressListener.currentChunk(partition, context.currentChunkId(), firstKey, lastKey);
             }
@@ -591,6 +586,22 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
             key[i] = fieldValue instanceof ValueWrapper<?> ? ((ValueWrapper<Object>) fieldValue).getWrappedValue()
                     : fieldValue;
         }
+        return key;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object[] IDkeyFromRow(Object[] row) {
+        if (row == null) {
+            return null;
+        }
+        final List<Column> keyColumns = List.of(currentTable.columnWithName("id"));
+        final Object[] key = new Object[keyColumns.size()];
+        for (int i = 0; i < keyColumns.size(); i++) {
+            final Object fieldValue = row[keyColumns.get(i).position() - 1];
+            key[i] = fieldValue instanceof ValueWrapper<?> ? ((ValueWrapper<Object>) fieldValue).getWrappedValue()
+                    : fieldValue;
+        }
+        LOGGER.info("KEY {}", Arrays.toString(key));
         return key;
     }
 
