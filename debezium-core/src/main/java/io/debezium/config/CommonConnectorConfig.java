@@ -7,13 +7,7 @@ package io.debezium.config;
 
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.EnumSet;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -414,6 +408,15 @@ public abstract class CommonConnectorConfig {
                     "This doesn't affect the snapshot events' values, but the schema of snapshot events may have outdated defaults.")
             .withDefault(Boolean.FALSE);
 
+    public static final Field INCREMENTAL_SNAPSHOT_CHUNK_KEY_COLUMNS = Field.create("incremental.snapshot.chunk.key.columns")
+            .withDisplayName("List of columns to be used by query during incremental snapshot")
+            .withType(Type.STRING)
+            .withWidth(Width.MEDIUM)
+            .withImportance(Importance.LOW)
+            .withValidation(Field::isListOfRegex)
+            .withDescription("")
+            .withDefault(Boolean.FALSE);
+
     public static final Field SNAPSHOT_MODE_TABLES = Field.create("snapshot.include.collection.list")
             .withDisplayName("Snapshot mode include data collection")
             .withType(Type.LIST)
@@ -592,6 +595,7 @@ public abstract class CommonConnectorConfig {
     private final int snapshotFetchSize;
     private final int incrementalSnapshotChunkSize;
     private final boolean incrementalSnapshotAllowSchemaChanges;
+    private final String incrementalSnapshotChunkKeyColumns;
     private final int snapshotMaxThreads;
     private final Integer queryFetchSize;
     private final SourceInfoStructMaker<? extends AbstractSourceInfo> sourceInfoStructMaker;
@@ -623,6 +627,7 @@ public abstract class CommonConnectorConfig {
         this.queryFetchSize = config.getInteger(QUERY_FETCH_SIZE);
         this.incrementalSnapshotChunkSize = config.getInteger(INCREMENTAL_SNAPSHOT_CHUNK_SIZE);
         this.incrementalSnapshotAllowSchemaChanges = config.getBoolean(INCREMENTAL_SNAPSHOT_ALLOW_SCHEMA_CHANGES);
+        this.incrementalSnapshotChunkKeyColumns = config.getString(INCREMENTAL_SNAPSHOT_CHUNK_KEY_COLUMNS);
         this.schemaNameAdjustmentMode = SchemaNameAdjustmentMode.parse(config.getString(SCHEMA_NAME_ADJUSTMENT_MODE));
         this.sourceInfoStructMaker = getSourceInfoStructMaker(Version.parse(config.getString(SOURCE_STRUCT_MAKER_VERSION)));
         this.sanitizeFieldNames = config.getBoolean(SANITIZE_FIELD_NAMES) || isUsingAvroConverter(config);
@@ -722,6 +727,7 @@ public abstract class CommonConnectorConfig {
     public int getIncrementalSnashotChunkSize() {
         return incrementalSnapshotChunkSize;
     }
+    public String getIncrementalSnapshotChunkKeyColumns() { return incrementalSnapshotChunkKeyColumns; };
 
     public boolean shouldProvideTransactionMetadata() {
         return shouldProvideTransactionMetadata;
@@ -922,6 +928,17 @@ public abstract class CommonConnectorConfig {
     public String getSignalingDataCollectionId() {
         return signalingDataCollection;
     }
+
+    public Map<String, String[]> parseChunkKeyQueryConfig(String stringConfig) {
+        Map<String, String[]> tableKeys = new LinkedHashMap<>();
+        for (String tableAndColumns : stringConfig.split(";")) {
+            String[] tableConfig = tableAndColumns.split(":", 0);
+            String tableName = tableConfig[0];
+            String[] columns = tableConfig[1].split(",");
+            tableKeys.put(tableName, columns);
+        }
+        return tableKeys;
+    };
 
     public Optional<String[]> parseSignallingMessage(Struct value) {
         final Struct after = value.getStruct(Envelope.FieldName.AFTER);

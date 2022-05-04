@@ -13,6 +13,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import io.debezium.relational.*;
 import org.apache.kafka.connect.data.Struct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,15 +28,7 @@ import io.debezium.pipeline.source.spi.SnapshotProgressListener;
 import io.debezium.pipeline.spi.ChangeRecordEmitter;
 import io.debezium.pipeline.spi.OffsetContext;
 import io.debezium.pipeline.spi.Partition;
-import io.debezium.relational.Column;
 import io.debezium.relational.Key.KeyMapper;
-import io.debezium.relational.RelationalDatabaseConnectorConfig;
-import io.debezium.relational.RelationalDatabaseSchema;
-import io.debezium.relational.RelationalSnapshotChangeEventSource;
-import io.debezium.relational.SnapshotChangeRecordEmitter;
-import io.debezium.relational.Table;
-import io.debezium.relational.TableId;
-import io.debezium.relational.TableSchema;
 import io.debezium.schema.DataCollectionId;
 import io.debezium.schema.DatabaseSchema;
 import io.debezium.util.Clock;
@@ -184,7 +177,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
             addLowerBound(table, sql);
             condition = sql.toString();
         }
-        final String orderBy = Stream.of(table.columnWithName("id"))
+        final String orderBy = getQueryColumns(table).stream()
                 .map(c -> jdbcConnection.quotedColumnIdString(c.name()))
                 .collect(Collectors.joining(", "));
         /**
@@ -217,7 +210,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
         // For four columns
         // (k1 > ?) OR (k1 = ? AND k2 > ?) OR (k1 = ? AND k2 = ? AND k3 > ?) OR (k1 = ? AND k2 = ? AND k3 = ? AND k4 > ?)
         // etc.
-        final List<Column> pkColumns = Arrays.asList(table.columnWithName("id"));
+        final List<Column> pkColumns = getQueryColumns(table);
         if (pkColumns.size() > 1) {
             sql.append('(');
         }
@@ -243,7 +236,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
     }
 
     protected String buildMaxPrimaryKeyQuery(Table table) {
-        final String orderBy = Stream.of(table.columnWithName("id"))
+        final String orderBy = getQueryColumns(table).stream()
                 .map(c -> jdbcConnection.quotedColumnIdString(c.name()))
                 .collect(Collectors.joining(" DESC, ")) + " DESC";
         return jdbcConnection.buildSelectWithRowLimits(table.id(), 1, "*", Optional.empty(), orderBy);
@@ -302,7 +295,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
                         if (!rs.next()) {
                             return null;
                         }
-                        return IDkeyFromRow(jdbcConnection.rowToArray(currentTable, databaseSchema, rs,
+                        return keyFromRow(jdbcConnection.rowToArray(currentTable, databaseSchema, rs,
                                 ColumnUtils.toArray(rs, currentTable)));
                     }));
                     if (!context.maximumKey().isPresent()) {
@@ -476,8 +469,8 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
                 }
                 lastRow = row;
             }
-            final Object[] firstKey = IDkeyFromRow(firstRow);
-            final Object[] lastKey = IDkeyFromRow(lastRow);
+            final Object[] firstKey = keyFromRow(firstRow);
+            final Object[] lastKey = keyFromRow(lastRow);
             if (context.isNonInitialChunk()) {
                 progressListener.currentChunk(partition, context.currentChunkId(), firstKey, lastKey);
             }
@@ -579,29 +572,13 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
         if (row == null) {
             return null;
         }
-        final List<Column> keyColumns = getKeyMapper().getKeyKolumns(currentTable);
+        final List<Column> keyColumns = getQueryColumns(currentTable);
         final Object[] key = new Object[keyColumns.size()];
         for (int i = 0; i < keyColumns.size(); i++) {
             final Object fieldValue = row[keyColumns.get(i).position() - 1];
             key[i] = fieldValue instanceof ValueWrapper<?> ? ((ValueWrapper<Object>) fieldValue).getWrappedValue()
                     : fieldValue;
         }
-        return key;
-    }
-
-    @SuppressWarnings("unchecked")
-    private Object[] IDkeyFromRow(Object[] row) {
-        if (row == null) {
-            return null;
-        }
-        final List<Column> keyColumns = List.of(currentTable.columnWithName("id"));
-        final Object[] key = new Object[keyColumns.size()];
-        for (int i = 0; i < keyColumns.size(); i++) {
-            final Object fieldValue = row[keyColumns.get(i).position() - 1];
-            key[i] = fieldValue instanceof ValueWrapper<?> ? ((ValueWrapper<Object>) fieldValue).getWrappedValue()
-                    : fieldValue;
-        }
-        LOGGER.info("KEY {}", Arrays.toString(key));
         return key;
     }
 
@@ -638,5 +615,17 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
 
     private KeyMapper getKeyMapper() {
         return connectorConfig.getKeyMapper() == null ? table -> table.primaryKeyColumns() : connectorConfig.getKeyMapper();
+    }
+
+    private List<Column> getQueryColumns(Table table) {
+        if (connectorConfig.getIncrementalSnapshotChunkKeyColumns() != null){
+            String cfg  = connectorConfig.getIncrementalSnapshotChunkKeyColumns();
+            return Key.CustomKeyMapper.getInstance(cfg, x -> x.schema() + "." + x.table()).getKeyKolumns(table);
+        }
+        else if (connectorConfig.getKeyMapper() != null) {
+            return connectorConfig.getKeyMapper().getKeyKolumns(table);
+        } else {
+            return table.primaryKeyColumns();
+        }
     }
 }
