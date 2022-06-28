@@ -414,8 +414,7 @@ public abstract class CommonConnectorConfig {
             .withWidth(Width.MEDIUM)
             .withImportance(Importance.LOW)
             .withValidation(Field::isListOfRegex)
-            .withDescription("")
-            .withDefault(Boolean.FALSE);
+            .withDescription("");
 
     public static final Field SNAPSHOT_MODE_TABLES = Field.create("snapshot.include.collection.list")
             .withDisplayName("Snapshot mode include data collection")
