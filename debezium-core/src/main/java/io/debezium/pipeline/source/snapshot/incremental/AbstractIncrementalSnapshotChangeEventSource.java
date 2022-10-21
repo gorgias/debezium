@@ -11,9 +11,7 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.*;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
-import io.debezium.relational.*;
 import org.apache.kafka.connect.data.Struct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,6 +26,7 @@ import io.debezium.pipeline.source.spi.SnapshotProgressListener;
 import io.debezium.pipeline.spi.ChangeRecordEmitter;
 import io.debezium.pipeline.spi.OffsetContext;
 import io.debezium.pipeline.spi.Partition;
+import io.debezium.relational.*;
 import io.debezium.relational.Key.KeyMapper;
 import io.debezium.schema.DataCollectionId;
 import io.debezium.schema.DatabaseSchema;
@@ -190,8 +189,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
         if (overriddenSelect == null) {
             overriddenSelect = connectorConfig.getSnapshotSelectOverridesByTable().get(new TableId(null, table.id().schema(), table.id().table()));
         }
-        LOGGER.info("Running the query condition {" + condition + "}and orderBy {" + orderBy + "}");
-        return jdbcConnection.buildSelectWithRowLimits(table.id(),
+        return  jdbcConnection.buildSelectWithRowLimits(table.id(),
                 limit,
                 "*",
                 Optional.ofNullable(condition),
@@ -437,7 +435,7 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
         LOGGER.debug("Exporting data chunk from table '{}' (total {} tables)", currentTable.id(), context.dataCollectionsToBeSnapshottedCount());
 
         final String selectStatement = buildChunkQuery(currentTable);
-        LOGGER.debug("\t For table '{}' using select statement: '{}', key: '{}', maximum key: '{}'", currentTable.id(),
+        LOGGER.info("\t For table '{}' using select statement: '{}', key: '{}', maximum key: '{}'", currentTable.id(),
                 selectStatement, context.chunkEndPosititon(), context.maximumKey().get());
 
         final TableSchema tableSchema = databaseSchema.schemaFor(currentTable.id());
@@ -618,13 +616,14 @@ public abstract class AbstractIncrementalSnapshotChangeEventSource<P extends Par
     }
 
     private List<Column> getQueryColumns(Table table) {
-        if (connectorConfig.getIncrementalSnapshotChunkKeyColumns() != null){
-            String cfg  = connectorConfig.getIncrementalSnapshotChunkKeyColumns();
+        if (connectorConfig.getIncrementalSnapshotChunkKeyColumns() != null) {
+            String cfg = connectorConfig.getIncrementalSnapshotChunkKeyColumns();
             return Key.CustomKeyMapper.getInstance(cfg, x -> x.schema() + "." + x.table()).getKeyKolumns(table);
         }
         else if (connectorConfig.getKeyMapper() != null) {
             return connectorConfig.getKeyMapper().getKeyKolumns(table);
-        } else {
+        }
+        else {
             return table.primaryKeyColumns();
         }
     }
